@@ -1,0 +1,17 @@
+# Dependencia
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Entorno y editores
+.env
+.idea/
+.vscode/
+.DS_Store
+
+# Artefactos de salida
+*.csv
+transacciones.csv
