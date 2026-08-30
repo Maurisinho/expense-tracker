@@ -8,7 +8,7 @@ from typing import List, Optional
 from . import __version__
 from .models import CATEGORIAS_SUGERIDAS, Transaction
 from .reports import export_csv, format_money, summarize
-from .storage import Storage, default_data_file
+from .storage import DataStorage, build_storage, default_data_file
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,7 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cmd_agregar(args: argparse.Namespace, storage: Storage) -> int:
+def _cmd_agregar(args: argparse.Namespace, storage: DataStorage) -> int:
     try:
         tx = Transaction(
             tipo=args.tipo,
@@ -91,7 +91,7 @@ def _cmd_agregar(args: argparse.Namespace, storage: Storage) -> int:
     return 0
 
 
-def _cmd_listar(args: argparse.Namespace, storage: Storage) -> int:
+def _cmd_listar(args: argparse.Namespace, storage: DataStorage) -> int:
     transactions = storage.load()
     filtradas = _filtrar(transactions, args.tipo, args.categoria, args.desde, args.hasta)
 
@@ -115,7 +115,7 @@ def _cmd_listar(args: argparse.Namespace, storage: Storage) -> int:
     return 0
 
 
-def _cmd_eliminar(args: argparse.Namespace, storage: Storage) -> int:
+def _cmd_eliminar(args: argparse.Namespace, storage: DataStorage) -> int:
     transactions = storage.load()
     restantes = [tx for tx in transactions if tx.id != args.id]
     if len(restantes) == len(transactions):
@@ -126,7 +126,7 @@ def _cmd_eliminar(args: argparse.Namespace, storage: Storage) -> int:
     return 0
 
 
-def _cmd_resumen(args: argparse.Namespace, storage: Storage) -> int:
+def _cmd_resumen(args: argparse.Namespace, storage: DataStorage) -> int:
     transactions = storage.load()
     if args.mes is not None:
         if args.anio is None:
@@ -165,7 +165,7 @@ def _cmd_resumen(args: argparse.Namespace, storage: Storage) -> int:
     return 0
 
 
-def _cmd_exportar(args: argparse.Namespace, storage: Storage) -> int:
+def _cmd_exportar(args: argparse.Namespace, storage: DataStorage) -> int:
     transactions = storage.load()
     try:
         export_csv(transactions, args.archivo)
@@ -200,5 +200,5 @@ def _error(mensaje: str) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     """Punto de entrada principal de la aplicación."""
     args = _build_parser().parse_args(argv)
-    storage = Storage(args.data_file)
+    storage = build_storage(args.data_file)
     return args.func(args, storage)

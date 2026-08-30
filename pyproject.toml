@@ -4,15 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "expense-tracker"
-version = "0.1.0"
-description = "Gestor simple de gastos e ingresos personales desde la terminal."
+version = "0.2.0"
+description = "Gestor de gastos e ingresos: CLI, web para móvil y almacenamiento en Excel (OneDrive)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Expense Tracker contributors" }]
-keywords = ["gastos", "ingresos", "finanzas", "cli", "presupuesto"]
+keywords = ["gastos", "ingresos", "finanzas", "cli", "flask", "excel", "onedrive"]
+dependencies = [
+    "Flask>=3.0",
+    "openpyxl>=3.1",
+]
 classifiers = [
     "Environment :: Console",
+    "Environment :: Web Environment",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -27,6 +32,10 @@ classifiers = [
 
 [project.scripts]
 expense-tracker = "expense_tracker.cli:main"
+expense-tracker-web = "expense_tracker.webapp:main"
 
 [tool.setuptools]
 packages = ["expense_tracker"]
+
+[tool.setuptools.package-data]
+expense_tracker = ["templates/*.html", "static/*.css", "static/*.js"]

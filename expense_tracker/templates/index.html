@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e293b">
+  <title>Mis Gastos</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <header class="cabecera">
+    <div>
+      <h1>Mis Gastos</h1>
+      <p class="subtitulo">Todo se guarda en tu Excel en la nube (OneDrive)</p>
+    </div>
+    <span class="badge">{{ mes }}</span>
+  </header>
+
+  <main>
+    <section class="tarjetas" aria-label="Resumen del mes">
+      <div class="tarjeta ing"><span>Ingresos</span><b>{{ resumen_mes.total_ingresos|money }}</b></div>
+      <div class="tarjeta gas"><span>Gastos</span><b>{{ resumen_mes.total_gastos|money }}</b></div>
+      <div class="tarjeta bal"><span>Balance</span><b>{{ resumen_mes.balance|money }}</b></div>
+    </section>
+
+    {% if mensaje %}
+      <p class="aviso error">{{ mensaje }}</p>
+    {% endif %}
+    {% if correcto %}
+      <p class="aviso ok">Guardado en el Excel.</p>
+    {% endif %}
+
+    <section class="panel">
+      <h2>Añadir registro</h2>
+      <form method="post" action="{{ url_for('agregar') }}" id="formAdd">
+        <div class="fila tipo">
+          <label><input type="radio" name="tipo" value="gasto" checked> Gasto</label>
+          <label><input type="radio" name="tipo" value="ingreso"> Ingreso</label>
+        </div>
+        <input name="descripcion" placeholder="Descripción" required maxlength="120" autocomplete="off">
+        <input name="monto" type="number" step="0.01" min="0" placeholder="0.00" required inputmode="decimal">
+        <input name="categoria" list="cats" placeholder="Categoría (en blanco = otros)" autocomplete="off">
+        <datalist id="cats">
+          {% for c in categorias %}<option value="{{ c }}"></option>{% endfor %}
+        </datalist>
+        <input name="fecha" type="date" value="{{ hoy }}">
+        <button type="submit" class="boton">Guardar</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Gastos del mes por categoría</h2>
+      {% if resumen_mes['por_categoria'] %}
+        <div class="barras">
+          {% for cat, monto in resumen_mes['por_categoria'].items() %}
+            <div class="barra-fila">
+              <span class="etq">{{ cat }}</span>
+              <span class="barra-caja">
+                <span class="barra" style="width:{{ (monto / resumen_mes.total_gastos * 100) if resumen_mes.total_gastos else 0 }}%"></span>
+              </span>
+              <span class="val">{{ monto|money }}</span>
+            </div>
+          {% endfor %}
+        </div>
+        <p class="pie"> Total del mes: <b>{{ resumen_mes.total_gastos|money }}</b> ·
+          Total histórico: <b>{{ resumen.total_gastos|money }}</b></p>
+      {% else %}
+        <p class="pie">Sin gastos este mes.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Movimientos recientes</h2>
+      <ul class="lista">
+        {% for tx in transacciones %}
+          <li class="item {{ tx.tipo }}">
+            <div class="info">
+              <span class="fecha">{{ tx.fecha.isoformat() }}</span>
+              <span class="cat">{{ tx.categoria }}</span>
+              <span class="desc">{{ tx.descripcion }}</span>
+            </div>
+            <span class="monto {{ tx.tipo }}">{{ ('-' if tx.tipo == 'gasto' else '+') ~ tx.monto|money }}</span>
+            <form method="post" action="{{ url_for('eliminar', tx_id=tx.id) }}" class="borrar"
+                  onsubmit="return confirm('¿Eliminar esta transacción?');">
+              <button type="submit" aria-label="Eliminar">×</button>
+            </form>
+          </li>
+        {% else %}
+          <li class="vacio">Sin movimientos todavía. ¡Añade el primero!</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

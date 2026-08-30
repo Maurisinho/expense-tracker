@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from expense_tracker.cli import main
 from expense_tracker.models import Transaction
 from expense_tracker.reports import export_csv, summarize
-from expense_tracker.storage import Storage
+from expense_tracker.storage import Storage, build_storage
+from expense_tracker.webapp import crear_app
 
 
 class TransactionTests(unittest.TestCase):
@@ -70,6 +71,42 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(len(cargadas), 1)
             self.assertEqual(cargadas[0], tx)
 
+    def test_build_storage_elige_segun_extension(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsInstance(build_storage(Path(tmp) / "d.json"), Storage)
+            from expense_tracker.excel_store import ExcelStorage
+            self.assertIsInstance(build_storage(Path(tmp) / "d.xlsx"), ExcelStorage)
+
+
+class ExcelStorageTests(unittest.TestCase):
+
+    def test_roundtrip_excel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archivo = Path(tmp) / "datos.xlsx"
+            storage = build_storage(archivo)
+            tx = Transaction("gasto", "Café", 4.5, "comida", "2026-08-10")
+            storage.save([tx])
+            cargadas = storage.load()
+            self.assertEqual(len(cargadas), 1)
+            self.assertEqual(cargadas[0], tx)
+
+    def test_carga_vacio_cuando_no_existe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = build_storage(Path(tmp) / "sin_datos.xlsx")
+            self.assertEqual(storage.load(), [])
+
+    def test_carga_acepta_fechas_editadas_por_excel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archivo = Path(tmp) / "datos.xlsx"
+            build_storage(archivo).save([])
+            from openpyxl import load_workbook
+            wb = load_workbook(archivo)
+            wb.active.append(["id123", "gasto", "Prueba", 9.5, "otros", "2026-08-15"])
+            wb.save(archivo)
+            cargadas = build_storage(archivo).load()
+            self.assertEqual(len(cargadas), 1)
+            self.assertEqual(cargadas[0].descripcion, "Prueba")
+
 
 class ReportTests(unittest.TestCase):
 
@@ -113,10 +150,11 @@ class CliTests(unittest.TestCase):
     def tearDown(self):
         self._tempdir.cleanup()
 
-    def ejecutar(self, *args):
+    def ejecutar(self, *args, data_file=None):
+        archivo = data_file or self.data_file
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            codigo = main(["--data-file", self.data_file, *args])
+            codigo = main(["--data-file", archivo, *args])
         return codigo, buffer.getvalue()
 
     def test_agregar_y_listar(self):
@@ -172,6 +210,79 @@ class CliTests(unittest.TestCase):
         codigo, salida = self.ejecutar("exportar", "--archivo", salida_csv)
         self.assertEqual(codigo, 0)
         self.assertTrue(os.path.exists(salida_csv))
+
+    def test_cli_escribe_en_excel(self):
+        archivo = str(Path(self._tempdir.name) / "datos.xlsx")
+        codigo, _ = self.ejecutar("agregar", "--descripcion", "Cena", "--monto", "25",
+                                  "--categoria", "comida", data_file=archivo)
+        self.assertEqual(codigo, 0)
+        self.assertTrue(os.path.exists(archivo))
+        _, salida = self.ejecutar("listar", data_file=archivo)
+        self.assertIn("Cena", salida)
+
+    def test_mensaje_guardado_en_excel(self):
+        archivo = str(Path(self._tempdir.name) / "datos.xlsx")
+        self.ejecutar("agregar", "--descripcion", "Bus", "--monto", "2", data_file=archivo)
+        from expense_tracker.excel_store import ExcelStorage
+        excel = ExcelStorage(archivo)
+        cargadas = excel.load()
+        self.assertEqual(len(cargadas), 1)
+        self.assertEqual(cargadas[0].descripcion, "Bus")
+
+
+class WebAppTests(unittest.TestCase):
+
+    def setUp(self):
+        self._tempdir = tempfile.TemporaryDirectory()
+        self.data_file = str(Path(self._tempdir.name) / "web.xlsx")
+        app = crear_app(self.data_file)
+        app.testing = True
+        self.client = app.test_client()
+
+    def tearDown(self):
+        self._tempdir.cleanup()
+
+    def test_pagina_inicial(self):
+        respuesta = self.client.get("/")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn("Mis Gastos", respuesta.get_data(as_text=True))
+
+    def test_agregar_desde_la_web(self):
+        respuesta = self.client.post("/agregar", data={
+            "tipo": "gasto",
+            "descripcion": "Café en la web",
+            "monto": "3.5",
+            "categoria": "comida",
+            "fecha": "2026-08-10",
+        })
+        self.assertEqual(respuesta.status_code, 302)
+        pagina = self.client.get("/").get_data(as_text=True)
+        self.assertIn("Café en la web", pagina)
+
+    def test_monto_invalido_desde_la_web(self):
+        respuesta = self.client.post("/agregar", data={
+            "monto": "-5",
+            "descripcion": "Mal",
+        }, follow_redirects=True)
+        self.assertEqual(respuesta.status_code, 200)
+        pagina = respuesta.get_data(as_text=True)
+        self.assertIn("El monto no puede ser negativo", pagina)
+
+    def test_eliminar_desde_la_web(self):
+        self.client.post("/agregar", data={
+            "descripcion": "A eliminar",
+            "monto": "10",
+        })
+        from expense_tracker.excel_store import ExcelStorage
+        tx = ExcelStorage(self.data_file).load()[0]
+        respuesta = self.client.post("/eliminar/{}".format(tx.id))
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertEqual(ExcelStorage(self.data_file).load(), [])
+
+    def test_salud(self):
+        respuesta = self.client.get("/salud")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json, {"ok": True})
 
 
 if __name__ == "__main__":
