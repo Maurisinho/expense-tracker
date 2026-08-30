@@ -5,16 +5,23 @@ import os
 from datetime import date
 from typing import List
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 
 from .models import CATEGORIAS_SUGERIDAS, Transaction
 from .reports import format_money, summarize
+from .shortcuts import generator_atajo
 from .storage import build_storage, default_data_file
 
 
 def _recientes(transacciones: List[Transaction], limite: int = 100) -> List[Transaction]:
     ordenadas = sorted(transacciones, key=lambda tx: (tx.fecha, tx.id), reverse=True)
     return ordenadas[:limite]
+
+
+def _dato(campo, por_defecto=""):
+    """Lee un campo desde el cuerpo JSON, el formulario o la URL."""
+    cuerpo = request.get_json(silent=True) or {}
+    return (cuerpo or {}).get(campo) or request.form.get(campo) or request.args.get(campo) or por_defecto
 
 
 def crear_app(data_file=None) -> Flask:
@@ -79,6 +86,69 @@ def crear_app(data_file=None) -> Flask:
     @app.get("/salud")
     def salud():
         return {"ok": True}
+
+    @app.get("/api/salud")
+    def api_salud():
+        return jsonify({"ok": True})
+
+    @app.route("/api/agregar", methods=["GET", "POST"])
+    def api_agregar():
+        try:
+            tx = Transaction(
+                tipo=_dato("tipo", "gasto"),
+                descripcion=_dato("descripcion"),
+                monto=_dato("monto") or 0,
+                categoria=_dato("categoria", "otros"),
+                fecha=_dato("fecha") or date.today().isoformat(),
+            )
+        except ValueError as error:
+            return jsonify({"ok": False, "error": str(error)}), 400
+
+        storage = build_storage(app.config["DATA_FILE"])
+        transacciones = storage.load()
+        transacciones.append(tx)
+        storage.save(transacciones)
+        return jsonify({"ok": True, "id": tx.id, "transaccion": tx.to_dict()})
+
+    @app.get("/atajo/instalar")
+    def atajo_instalar():
+        esquema = request.headers.get("X-Forwarded-Proto", request.scheme)
+        url_api = f"{esquema}://{request.host}/api/agregar"
+        contenido = generator_atajo(url_api, nombre_atayo="Nuevo gasto")
+        return Response(
+            contenido,
+            mimetype="application/octet-stream",
+            headers={"Content-Disposition": "attachment; filename=nuevo-gasto.shortcut"},
+        )
+
+    @app.get("/api/listar")
+    def api_listar():
+        storage = build_storage(app.config["DATA_FILE"])
+        transacciones = sorted(storage.load(), key=lambda t: t.fecha, reverse=True)
+        return jsonify({"transacciones": [t.to_dict() for t in transacciones]})
+
+    @app.get("/api/resumen")
+    def api_resumen():
+        storage = build_storage(app.config["DATA_FILE"])
+        transacciones = storage.load()
+        hoy = date.today()
+        del_mes = [t for t in transacciones
+                   if (t.fecha.year, t.fecha.month) == (hoy.year, hoy.month)]
+        return jsonify({
+            "resumen": summarize(transacciones),
+            "resumen_mes": summarize(del_mes),
+            "mes": hoy.isoformat()[:7],
+        })
+
+    @app.route("/api/eliminar/<tx_id>", methods=["GET", "POST", "DELETE"])
+    def api_eliminar(tx_id):
+        storage = build_storage(app.config["DATA_FILE"])
+        transacciones = storage.load()
+        restantes = [t for t in transacciones if t.id != tx_id]
+        if len(restantes) == len(transacciones):
+            return jsonify({"ok": False, "error": "No se encontró la transacción."}), 404
+        storage.save(restantes)
+        return jsonify({"ok": True, "id": tx_id})
 
     return app
 

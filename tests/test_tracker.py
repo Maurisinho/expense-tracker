@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from expense_tracker.cli import main
 from expense_tracker.models import Transaction
 from expense_tracker.reports import export_csv, summarize
+from expense_tracker.shortcuts import generator_atajo
 from expense_tracker.storage import Storage, build_storage
 from expense_tracker.webapp import crear_app
 
@@ -283,6 +284,109 @@ class WebAppTests(unittest.TestCase):
         respuesta = self.client.get("/salud")
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta.json, {"ok": True})
+
+
+class ApiTests(unittest.TestCase):
+
+    def setUp(self):
+        self._tempdir = tempfile.TemporaryDirectory()
+        self.data_file = str(Path(self._tempdir.name) / "api.xlsx")
+        app = crear_app(self.data_file)
+        app.testing = True
+        self.client = app.test_client()
+
+    def tearDown(self):
+        self._tempdir.cleanup()
+
+    def test_api_salud(self):
+        respuesta = self.client.get("/api/salud")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json, {"ok": True})
+
+    def test_api_agregar_con_json(self):
+        respuesta = self.client.post("/api/agregar", json={
+            "tipo": "gasto",
+            "descripcion": "Café via API",
+            "monto": 3.5,
+            "categoria": "comida",
+            "fecha": "2026-08-11",
+        })
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta.json["ok"])
+        self.assertIn("id", respuesta.json)
+
+    def test_api_agregar_con_form(self):
+        respuesta = self.client.post("/api/agregar", data={
+            "descripcion": "Bus",
+            "monto": "2.25",
+        })
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta.json["ok"])
+
+    def test_api_agregar_invalido_devuelve_400(self):
+        respuesta = self.client.post("/api/agregar", json={
+            "descripcion": "Malo",
+            "monto": -1,
+        })
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertFalse(respuesta.json["ok"])
+
+    def test_api_listar(self):
+        self.client.post("/api/agregar", json={"descripcion": "Cena", "monto": 20})
+        respuesta = self.client.get("/api/listar")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(len(respuesta.json["transacciones"]), 1)
+        self.assertEqual(respuesta.json["transacciones"][0]["descripcion"], "Cena")
+
+    def test_api_resumen(self):
+        self.client.post("/api/agregar", json={"tipo": "ingreso", "descripcion": "Nómina", "monto": 1000})
+        self.client.post("/api/agregar", json={"descripcion": "Café", "monto": 5})
+        respuesta = self.client.get("/api/resumen")
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json["resumen"]["total_ingresos"], 1000.0)
+        self.assertEqual(respuesta.json["resumen"]["total_gastos"], 5.0)
+
+    def test_api_eliminar(self):
+        self.client.post("/api/agregar", json={"descripcion": "A borrar", "monto": 8})
+        lista = self.client.get("/api/listar").json["transacciones"]
+        tx_id = lista[0]["id"]
+        respuesta = self.client.delete("/api/eliminar/{}".format(tx_id))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta.json["ok"])
+        self.assertEqual(self.client.get("/api/listar").json["transacciones"], [])
+
+    def test_api_eliminar_inexistente(self):
+        respuesta = self.client.delete("/api/eliminar/nope")
+        self.assertEqual(respuesta.status_code, 404)
+        self.assertFalse(respuesta.json["ok"])
+
+
+class ShortcutTests(unittest.TestCase):
+
+    def test_genera_un_plist_valido(self):
+        import plistlib
+        contenido = generator_atajo("https://ejemplo.com/api/agregar", "Prueba")
+        flujo = plistlib.loads(contenido)
+        self.assertEqual(flujo["WFWorkflowName"], "Prueba")
+        acciones = flujo["WFWorkflowActions"]
+        self.assertEqual(len(acciones), 5)
+        descarga = next(a for a in acciones
+                        if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.downloadurl")
+        parametros = descarga["WFWorkflowActionParameters"]
+        self.assertEqual(parametros["WFURL"], "https://ejemplo.com/api/agregar")
+        self.assertEqual(parametros["WFHTTPMethod"], "POST")
+        self.assertEqual(parametros["WFJSONValues"]["tipo"], "gasto")
+
+    def test_ruta_instalar_devuelve_atajo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = crear_app(os.path.join(tmp, "s.xlsx"))
+            app.testing = True
+            cliente = app.test_client()
+            respuesta = cliente.get("/atajo/instalar")
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertTrue(respuesta.data.startswith(b"bplist"))
+            self.assertIn("filename=nuevo-gasto.shortcut",
+                          respuesta.headers["Content-Disposition"])
 
 
 if __name__ == "__main__":

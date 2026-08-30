@@ -173,6 +173,9 @@ input:focus { outline: 2px solid var(--acento); outline-offset: -1px; }
 
 .vacio { padding: 1.5rem 0; text-align: center; color: var(--tinta-suave); }
 
+.atajos { text-align: center; margin-top: 0.5rem; padding-bottom: env(safe-area-inset-bottom); }
+.atajos a { color: var(--acento); text-decoration: none; font-weight: 600; }
+
 @media (min-width: 600px) {
   .tarjetas { grid-template-columns: repeat(3, 1fr); }
   .cabecera { padding: 1rem 1.5rem; }
